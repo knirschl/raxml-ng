@@ -1867,7 +1867,6 @@ void build_trees_parallel(RaxmlInstance& instance, TreeList& tree_list, Starting
   ParallelContext::finalize_threads();
 }
 
-
 void build_start_trees(RaxmlInstance& instance, unsigned int num_threads = 0)
 {
   auto& opts = instance.opts;
@@ -1949,6 +1948,88 @@ void build_start_trees(RaxmlInstance& instance, unsigned int num_threads = 0)
 
         instance.start_trees.emplace_back(tree);
       }
+    }
+  }
+
+  if (::ParallelContext::master_rank())
+  {
+    NewickStream nw_start(opts.start_tree_file());
+    for (auto const& tree: instance.start_trees)
+      nw_start << tree;
+  }
+}
+
+void unroot_start_trees(RaxmlInstance& instance, unsigned int num_threads = 0)
+{
+  auto& opts = instance.opts;
+
+  /* all start trees were already generated/loaded -> return */
+  if (instance.start_trees.size() >= instance.opts.num_searches)
+    return;
+
+  for (auto& st_tree: opts.start_trees)
+  {
+    auto st_tree_type = st_tree.first;
+    auto& st_tree_count = st_tree.second;
+
+    if (st_tree_type != StartingTree::user)
+    {
+      LOG_ERROR << "Only user trees can be unrooted. Please specify a user tree to unroot." << endl;
+      continue;
+    }
+
+    LOG_INFO_TS << "Loading user starting tree(s) from: " << opts.tree_file << endl;
+    if (!sysutil_file_exists(opts.tree_file))
+      throw runtime_error("File not found: " + opts.tree_file);
+    instance.start_tree_stream.reset(new NewickStream(opts.tree_file, std::ios::in));
+    
+    // init seeds
+    /*intVector seeds(st_tree_count);
+    for (size_t i = 0; i < st_tree_count; ++i)
+      seeds[i] = rand();
+*/
+    for (size_t i = 0; i < st_tree_count; ++i)
+    {
+      //auto tree = generate_tree(instance, st_tree_type, seeds[i]);
+      Tree tree;
+      
+      assert(instance.start_tree_stream);
+
+      /* parse the unrooted binary tree in newick format, and store the number
+         of tip nodes in tip_nodes_count */
+      *instance.start_tree_stream >> tree;
+
+      LOG_DEBUG << "Loaded user starting tree with " << tree.num_tips() << " taxa from: "
+                           << opts.tree_file << endl;
+
+      prune_duplicate_seqs(instance, tree);
+
+      if (opts.brlen_reset_usertree)
+        tree.reset_brlens();
+
+      if (!instance.constraint_tree.empty())
+      {
+        tree.reset_tip_ids(instance.tip_id_map);
+        if (!instance.constraint_tree.compatible(tree))
+        {
+          throw runtime_error("User starting tree incompatible with the specified topological constraint!");
+        }
+      }
+
+      assert(!tree.empty());
+  
+      /* fix missing & outbound branch lengths */
+      tree.fix_missing_brlens();
+      tree.fix_outbound_brlens(instance.opts.brlen_min, instance.opts.brlen_max);
+      
+      // TODO use universal starting tree generator
+      if (instance.start_tree_stream->peek() != EOF)
+      {
+        st_tree_count++;
+        opts.num_searches++;
+      }
+
+      instance.start_trees.emplace_back(tree);
     }
   }
 
@@ -4184,6 +4265,7 @@ int internal_main(int argc, char** argv, void* comm)
       case Command::ancestral:
       case Command::mutmap:
       case Command::modeltest:
+      case Command::unroot:
         if (!opts.redo_mode && opts.result_files_exist())
         {
           LOG_ERROR << endl << "ERROR: Result files for the run with prefix `" <<
@@ -4344,6 +4426,20 @@ int internal_main(int argc, char** argv, void* comm)
           load_parted_msa(instance);
           load_constraint(instance);
           build_start_trees(instance);
+          if (!opts.start_tree_file().empty())
+          {
+            LOG_INFO << "\nAll starting trees saved to: " <<
+                sysutil_realpath(opts.start_tree_file()) << endl << endl;
+          }
+          else
+          {
+            LOG_INFO << "\nStarting trees have been successfully generated." << endl << endl;
+          }
+          break;
+        }
+        case Command::unroot:
+        {
+          unroot_start_trees(instance);
           if (!opts.start_tree_file().empty())
           {
             LOG_INFO << "\nAll starting trees saved to: " <<

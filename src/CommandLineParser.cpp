@@ -109,6 +109,7 @@ static struct option long_options[] =
   {"moose",              optional_argument, 0, 0 },  /*  76 */
   {"moose-options",      required_argument, 0, 0 },  /*  77 */
   {"mutmap",             optional_argument, 0, 0 },  /*  78 */
+  {"unroot",             no_argument,       0, 0 },  /*  79 */
 
   { 0, 0, 0, 0 }
 };
@@ -137,7 +138,7 @@ void CommandLineParser::check_options(Options &opts)
   if (opts.command == Command::evaluate || opts.command == Command::support ||
       opts.command == Command::terrace || opts.command == Command::rfdist ||
       opts.command == Command::sitelh || opts.command == Command::ancestral ||
-      opts.command == Command::consense)
+      opts.command == Command::consense || opts.command == Command::unroot)
   {
     if (opts.tree_file.empty() && (opts.start_trees.count(StartingTree::user) || opts.start_trees.empty()))
       throw OptionException("Please provide a valid Newick file as an argument of --tree option.");
@@ -145,10 +146,15 @@ void CommandLineParser::check_options(Options &opts)
 
   if (opts.command == Command::start && !opts.tree_file.empty())
   {
-    throw OptionException("You specified a user starting tree) for the starting tree generation "
+    throw OptionException("You specified a user starting tree for the starting tree generation "
         "command, which does not make any sense!\n"
         "Please choose whether you want to generate parsimony or random starting trees!");
   }
+
+  /*if (opts.command == Command::unroot && opts.tree_file.empty())
+  {
+    throw OptionException("You must specify a Newick file with the tree to be unrooted with the --tree switch");
+  }*/
 
   if (opts.command == Command::support)
   {
@@ -201,7 +207,7 @@ void CommandLineParser::check_options(Options &opts)
   }
 
   if (opts.command == Command::support || opts.command == Command::rfdist ||
-      opts.command == Command::consense)
+      opts.command == Command::consense || opts.command == Command::unroot)
   {
     assert(!opts.tree_file.empty() || !opts.outfile_names.bootstrap_trees.empty());
 
@@ -266,7 +272,8 @@ void CommandLineParser::compute_num_searches(Options &opts)
   if (opts.command == Command::search || opts.command == Command::all ||
       opts.command == Command::evaluate || opts.command == Command::start ||
       opts.command == Command::ancestral || opts.command == Command::sitelh ||
-      opts.command == Command::modeltest || opts.command == Command::mutmap)
+      opts.command == Command::modeltest || opts.command == Command::mutmap ||
+      opts.command == Command::unroot)
   {
     assert(!opts.start_trees.empty());
 
@@ -1603,6 +1610,10 @@ void CommandLineParser::parse_options(int argc, char** argv, Options &opts)
         opts.use_tip_inner = true;
         num_commands++;
         break;
+      case 79: /* unroot user tree */
+        opts.command = Command::unroot;
+        num_commands++;
+        break;
       default:
         throw  OptionException("Internal error in option parsing");
     }
@@ -1625,7 +1636,7 @@ void CommandLineParser::parse_options(int argc, char** argv, Options &opts)
 
   /* process start tree defaults */
   if (opts.command == Command::search || opts.command == Command::all ||
-      opts.command == Command::start)
+      opts.command == Command::start || opts.command == Command::unroot)
   {
     if (optarg_tree.empty())
     {
@@ -1692,6 +1703,7 @@ void CommandLineParser::print_help()
             "  --check                                    check alignment correctness and remove empty columns/rows\n"
             "  --parse                                    parse alignment, compress patterns and create binary MSA file\n"
             "  --start                                    generate parsimony/random starting trees and exit\n"
+            "  --unroot                                   unroot a user-specified tree\n"
             "  --rfdist                                   compute pair-wise Robinson-Foulds (RF) distances between trees\n"
             "  --consense [ STRICT | MR | MR<n> | MRE ]   build strict, majority-rule (MR) or extended MR (MRE) consensus tree (default: MR)\n"
             "                                             eg: --consense MR75 --tree bsrep.nw\n"

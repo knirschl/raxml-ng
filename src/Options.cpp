@@ -242,6 +242,8 @@ bool Options::result_files_exist() const
       return sysutil_file_exists(sitelh_file());
     case Command::modeltest:
       return sysutil_file_exists(modeltest_best_model_file());
+    case Command::unroot:
+      return sysutil_file_exists(start_tree_file());
     default:
       return false;
   }
@@ -267,7 +269,7 @@ void Options::remove_result_files() const
   if (command == Command::terrace)
     sysutil_file_remove(terrace_file());
 
-  if (command == Command::start)
+  if (command == Command::start || command == Command::unroot)
     sysutil_file_remove(start_tree_file());
 
   if (command == Command::bsmsa)
@@ -498,6 +500,9 @@ std::ostream& operator<<(std::ostream& stream, const Options& opts)
       break;
     case Command::modeltest:
       stream << "Model selection";
+      break;
+    case Command::unroot:
+      stream << "Unrooting tree";
       break;
     default:
       break;
