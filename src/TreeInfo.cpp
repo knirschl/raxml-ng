@@ -82,7 +82,7 @@ void TreeInfo::init(const Options &opts, const Tree &tree, const PartitionedMSA 
                                         tree.num_tips(),
                                         partition_count, opts.brlen_linkage);
 
-  libpll_check_error("ERROR creating treeinfo structure");
+  coraxlib_check_error("ERROR creating treeinfo structure");
   assert(_pll_treeinfo);
 
   // init partitions
@@ -111,7 +111,7 @@ void TreeInfo::init(const Options &opts, const Tree &tree, const PartitionedMSA 
 
   if (!retval) {
     assert(corax_errno);
-    libpll_check_error("ERROR adding treeinfo partition");
+    coraxlib_check_error("ERROR adding treeinfo partition");
   }
 
   // set per-partition branch lengths or scalers
@@ -163,7 +163,7 @@ void TreeInfo::init(const Options &opts, const Tree &tree, const PartitionedMSA 
                                         tree.num_tips(),
                                         parted_msa.part_count(), opts.brlen_linkage);
 
-  libpll_check_error("ERROR creating treeinfo structure");
+  coraxlib_check_error("ERROR creating treeinfo structure");
   assert(_pll_treeinfo);
 
   corax_treeinfo_set_parallel_context(_pll_treeinfo, (void *) nullptr,
@@ -200,7 +200,7 @@ void TreeInfo::init(const Options &opts, const Tree &tree, const PartitionedMSA 
       if (!retval)
       {
         assert(corax_errno);
-        libpll_check_error("ERROR adding treeinfo partition");
+        coraxlib_check_error("ERROR adding treeinfo partition");
       }
 
       // set per-partition branch lengths or scalers
@@ -296,7 +296,7 @@ Tree TreeInfo::tree(size_t partition_id) const
 
   if (!pll_utree) {
     assert(corax_errno);
-    libpll_check_error("treeinfo: cannot get partition tree");
+    coraxlib_check_error("treeinfo: cannot get partition tree");
   }
 
   return Tree(pll_utree);
@@ -341,7 +341,10 @@ double TreeInfo::optimize_branches(double lh_epsilon, double brlen_smooth_factor
   /* update all CLVs and p-matrices before calling BLO */
   double new_loglh = loglh();
 
-  if (_pll_treeinfo->params_to_optimize[0] & CORAX_OPT_PARAM_BRANCHES_ITERATIVE) {
+  if (_pll_treeinfo->params_to_optimize[0] & CORAX_OPT_PARAM_BRANCHES_ITERATIVE)
+  {
+    Tree old_tree(*_pll_treeinfo->tree);
+
     int max_iters = brlen_smooth_factor * RAXML_BRLEN_SMOOTHINGS;
     new_loglh = -1 * corax_algo_opt_brlen_treeinfo(_pll_treeinfo,
                                                    _brlen_min,
@@ -352,15 +355,47 @@ double TreeInfo::optimize_branches(double lh_epsilon, double brlen_smooth_factor
                                                    CORAX_OPT_BRLEN_OPTIMIZE_ALL
                 );
 
+    if (corax_errno == CORAX_OPT_ERROR_NEWTON_WORSE_LK &&
+        _pll_treeinfo->brlen_linkage != CORAX_BRLEN_UNLINKED)
+    {
+      LOG_WARN << "WARNING: " << string(corax_errmsg) << endl;
+
+      /* fallback to nr_safe mode (check loglh after every branch opt) */
+      _brlen_opt_method = CORAX_OPT_BLO_NEWTON_SAFE;
+      corax_reset_error();
+
+      /* retore old branch lengths */
+      auto old_brlens = old_tree.brlens();
+      auto corax_tree =  _pll_treeinfo->tree;
+      for (size_t i = 0; i < corax_tree->tip_count + corax_tree->inner_count; ++i)
+      {
+        auto node = corax_tree->nodes[i];
+        auto length = old_brlens[node->pmatrix_index];
+        corax_utree_set_length(node, length);
+      }
+
+      new_loglh = loglh();
+
+      new_loglh = -1 * corax_algo_opt_brlen_treeinfo(_pll_treeinfo,
+                                                     _brlen_min,
+                                                     _brlen_max,
+                                                     lh_epsilon,
+                                                     max_iters,
+                                                     _brlen_opt_method,
+                                                     CORAX_OPT_BRLEN_OPTIMIZE_ALL
+                  );
+    }
+
     LOG_DEBUG << "\t - after brlen: logLH = " << new_loglh << endl;
 
-    libpll_check_error("ERROR in branch length optimization");
+    coraxlib_check_error("ERROR in branch length optimization");
     assert(isfinite(new_loglh));
   }
 
   /* optimize brlen scalers, if needed */
   if (_pll_treeinfo->brlen_linkage == CORAX_BRLEN_SCALED &&
-      _pll_treeinfo->partition_count > 1) {
+      _pll_treeinfo->partition_count > 1)
+  {
     new_loglh = -1 * corax_algo_opt_brlen_scalers_treeinfo(_pll_treeinfo,
                                                            RAXML_BRLEN_SCALER_MIN,
                                                            RAXML_BRLEN_SCALER_MAX,
@@ -370,7 +405,7 @@ double TreeInfo::optimize_branches(double lh_epsilon, double brlen_smooth_factor
 
     LOG_DEBUG << "\t - after brlen scalers: logLH = " << new_loglh << endl;
 
-    libpll_check_error("ERROR in brlen scaler optimization");
+    coraxlib_check_error("ERROR in brlen scaler optimization");
     assert(isfinite(new_loglh));
   }
 
@@ -402,7 +437,7 @@ double TreeInfo::optimize_params(int params_to_optimize, double lh_epsilon)
 
           LOG_DEBUG << "\t - after rates: logLH = " << new_loglh << endl;
 
-          libpll_check_error("ERROR in substitution rates optimization");
+          coraxlib_check_error("ERROR in substitution rates optimization");
           assert_lh_improvement(cur_loglh, new_loglh, "RATES");
           cur_loglh = new_loglh;
         }
@@ -420,7 +455,7 @@ double TreeInfo::optimize_params(int params_to_optimize, double lh_epsilon)
 
           LOG_DEBUG << "\t - after freqs: logLH = " << new_loglh << endl;
 
-          libpll_check_error("ERROR in base frequencies optimization");
+          coraxlib_check_error("ERROR in base frequencies optimization");
           assert_lh_improvement(cur_loglh, new_loglh, "FREQS");
           cur_loglh = new_loglh;
         }
@@ -438,7 +473,7 @@ double TreeInfo::optimize_params(int params_to_optimize, double lh_epsilon)
 
           LOG_DEBUG << "\t - after alpha: logLH = " << new_loglh << endl;
 
-          libpll_check_error("ERROR in alpha parameter optimization");
+          coraxlib_check_error("ERROR in alpha parameter optimization");
           assert_lh_improvement(cur_loglh, new_loglh, "ALPHA");
           cur_loglh = new_loglh;
         }
@@ -455,7 +490,7 @@ double TreeInfo::optimize_params(int params_to_optimize, double lh_epsilon)
 
           LOG_DEBUG << "\t - after p-inv: logLH = " << new_loglh << endl;
 
-          libpll_check_error("ERROR in p-inv optimization");
+          coraxlib_check_error("ERROR in p-inv optimization");
           assert_lh_improvement(cur_loglh, new_loglh, "PINV");
           cur_loglh = new_loglh;
         }
@@ -497,7 +532,7 @@ double TreeInfo::optimize_params(int params_to_optimize, double lh_epsilon)
           LOG_DEBUG << "\t - after freeR: logLH = " << new_loglh << endl;
           //    LOG_DEBUG << "\t - after freeR/crosscheck: logLH = " << loglh() << endl;
 
-          libpll_check_error("ERROR in FreeRate rates/weights optimization");
+          coraxlib_check_error("ERROR in FreeRate rates/weights optimization");
           assert_lh_improvement(cur_loglh, new_loglh, "FREE RATES");
           cur_loglh = new_loglh;
         }
@@ -536,7 +571,7 @@ double TreeInfo::spr_round(spr_round_params &params)
                                params.total_moves,
                                params.increasing_moves);
 
-  libpll_check_error("ERROR in SPR round");
+  coraxlib_check_error("ERROR in SPR round");
 
   if (params.total_moves) {
     LOG_DEBUG << "SPR moves = " << (*params.total_moves) << 
@@ -558,7 +593,7 @@ double TreeInfo::nni_round(nni_round_params &params) {
                                       params.lh_epsilon,
                                       false);
 
-  libpll_check_error("ERROR in NNI round");
+  coraxlib_check_error("ERROR in NNI round");
 
   assert(isfinite(loglh) && loglh);
 
@@ -572,7 +607,7 @@ void TreeInfo::set_topology_constraint(const Tree &cons_tree)
                                                     _use_old_constraint ? 1 : 0);
 
     if (!retval)
-      libpll_check_error("ERROR: Cannot set topological constraint");
+      coraxlib_check_error("ERROR: Cannot set topological constraint");
   }
 }
 
@@ -582,7 +617,7 @@ void TreeInfo::compute_ancestral(const AncestralStatesSharedPtr &ancestral,
   corax_ancestral_t *pll_ancestral = corax_treeinfo_compute_ancestral(_pll_treeinfo);
 
   if (!pll_ancestral)
-    libpll_check_error("Unable to compute ancestral states", true);
+    coraxlib_check_error("Unable to compute ancestral states", true);
 
   assert(pll_ancestral->partition_count > 0 && pll_ancestral->partition_indices);
 
@@ -617,7 +652,7 @@ void TreeInfo::sh_support(const sh_support_params &params, doubleVector &support
                                      params.lh_epsilon);
 
   if (!retval)
-    libpll_check_error("ERROR: Cannot compute SH-aLRT support values!");
+    coraxlib_check_error("ERROR: Cannot compute SH-aLRT support values!");
 }
 
 
@@ -634,7 +669,7 @@ void assign(PartitionedMSA &parted_msa, const TreeInfo &treeinfo)
 
     Model model(parted_msa.model(p));
     assign(model, treeinfo, p);
-    parted_msa.model(p, move(model));
+    parted_msa.model(p, std::move(model));
   }
 }
 
@@ -713,7 +748,7 @@ void set_partition_tips(const Options &opts, const MSA &msa, const IDVector &tip
 
     auto normalize = !msa.normalized();
 
-    // we need a libpll function for that!
+    // we need a coraxlib function for that!
     auto clv_size = partition->sites * partition->states;
     std::vector<double> tmp_clv(clv_size);
     for (size_t tip_id = 0; tip_id < partition->tips; ++tip_id) {
@@ -755,7 +790,7 @@ void set_partition_tips(const Options &opts, const MSA &msa, const IDVector &tip
 
     auto normalize = !msa.normalized();
 
-    // we need a libpll function for that!
+    // we need a coraxlib function for that!
     auto clv_size = comp_weights.size() * partition->states;
     std::vector<double> tmp_clv(clv_size);
     for (size_t tip_id = 0; tip_id < partition->tips; ++tip_id) {
@@ -848,7 +883,7 @@ corax_partition_t *create_pll_partition(const Options &opts, const MSA &msa, con
     attrs /* list of flags (SSE3/AVX, TIP-INNER special cases etc.) */
   );
 
-  libpll_check_error("ERROR creating pll_partition");
+  coraxlib_check_error("ERROR creating pll_partition");
   assert(partition);
 
   if (part_region.master() && !model.ascbias_weights().empty())
